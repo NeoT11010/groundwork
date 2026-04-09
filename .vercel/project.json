@@ -1,0 +1,15 @@
+{
+  "orgId": "team_AFNpMdCSKG1dsJtAYoJjCIe2",
+  "projectId": "groundwork-app",
+  "settings": {
+    "createdAt": 1712578800000,
+    "framework": null,
+    "devCommand": null,
+    "installCommand": null,
+    "buildCommand": null,
+    "outputDirectory": null,
+    "rootDirectory": null,
+    "directoryListing": false,
+    "nodeVersion": "20.x"
+  }
+}
