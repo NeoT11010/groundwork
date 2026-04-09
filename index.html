@@ -3335,10 +3335,21 @@ const DB = {
     };
   },
   async saveWizardData({ userId, co, trade, plant: plantList, vehicles: vehicleList, certs }) {
-    // Update company
-    const companyId = (await supabaseClient.from('profiles').select('company_id').eq('id', userId).single()).data?.company_id;
-    if (!companyId) return;
-    await supabaseClient.from('companies').update({ name: co.name || undefined, trade, employees: parseInt(co.employees) || undefined, turnover_band: co.turnover || undefined, updated_at: new Date().toISOString() }).eq('id', companyId);
+    // Get or create company
+    let companyId = (await supabaseClient.from('profiles').select('company_id').eq('id', userId).single()).data?.company_id;
+    if (!companyId) {
+      // New user — create company row and link it to their profile
+      const { data: newCo, error: coErr } = await supabaseClient
+        .from('companies')
+        .insert({ name: co.name || 'My Company', trade: trade || '', employees: parseInt(co.employees) || null, turnover_band: co.turnover || null, plan: 'essentials' })
+        .select('id').single();
+      if (coErr || !newCo) { console.error('Company create error:', coErr); return; }
+      companyId = newCo.id;
+      await supabaseClient.from('profiles').update({ company_id: companyId }).eq('id', userId);
+    } else {
+      // Returning user — update existing company
+      await supabaseClient.from('companies').update({ name: co.name || undefined, trade, employees: parseInt(co.employees) || undefined, turnover_band: co.turnover || undefined, updated_at: new Date().toISOString() }).eq('id', companyId);
+    }
     // Save plant fleet
     if (plantList.length > 0) {
       const plantRows = plantList.map(p => ({ company_id: companyId, name: p.name || p.type, category: p.type, fuel_type: p.hvo ? 'hvo' : 'diesel', ef_kg_per_hr: DEFRA.plant[p.type] ?? 12.5 }));
