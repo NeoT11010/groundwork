@@ -285,7 +285,13 @@ const NAV = [
   { id:'settings',   label:'Settings',        icon:'⚙️', built:false },
 ];
 
-const Sidebar = ({ current, onChange, onWizard, onSignOut }) => (
+const Sidebar = ({ current, onChange, onWizard, onSignOut }) => {
+  const { company, score, fullName } = useApp() || {};
+  const companyName = company?.name || 'Your Company';
+  const companyPlan = company?.plan ? (company.plan.charAt(0).toUpperCase() + company.plan.slice(1)) : 'Essentials';
+  const companyScore = score ?? company?.score ?? '—';
+  const initials = fullName ? fullName.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2) : 'GW';
+  return (
   <aside className="w-64 bg-brand-950 min-h-screen flex flex-col fixed left-0 top-0 z-30">
     <div className="px-6 py-5 border-b border-brand-800">
       <div className="flex items-center gap-3">
@@ -301,11 +307,11 @@ const Sidebar = ({ current, onChange, onWizard, onSignOut }) => (
     <div className="px-4 py-3 border-b border-brand-800 mx-3 my-3 bg-brand-900 rounded-xl">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-white text-xs font-semibold truncate">{COMPANY.name}</p>
-          <p className="text-brand-400 text-xs mt-0.5">{COMPANY.location}</p>
+          <p className="text-white text-xs font-semibold truncate">{companyName}</p>
+          <p className="text-brand-400 text-xs mt-0.5">{companyPlan} Plan</p>
         </div>
         <div className="text-right">
-          <p className="text-2xl font-bold text-amber-400 leading-none">{COMPANY.score}</p>
+          <p className="text-2xl font-bold text-amber-400 leading-none">{companyScore}</p>
           <p className="text-brand-400 text-xs">score</p>
         </div>
       </div>
@@ -324,19 +330,20 @@ const Sidebar = ({ current, onChange, onWizard, onSignOut }) => (
     <div className="px-4 py-4 border-t border-brand-800">
       <div className="flex items-center gap-2">
         <div className="w-7 h-7 rounded-full bg-brand-600 flex items-center justify-center">
-          <span className="text-white text-xs font-bold">MH</span>
+          <span className="text-white text-xs font-bold">{initials}</span>
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-white text-xs font-medium">Mani Hartley</p>
-          <p className="text-brand-400 text-xs">{COMPANY.plan} Plan</p>
+          <p className="text-white text-xs font-medium truncate">{fullName || companyName}</p>
+          <p className="text-brand-400 text-xs">{companyPlan} Plan</p>
         </div>
-        <span className="text-xs font-semibold text-lime-DEFAULT bg-brand-800 px-2 py-0.5 rounded-full">{COMPANY.plan}</span>
+        <span className="text-xs font-semibold text-lime-DEFAULT bg-brand-800 px-2 py-0.5 rounded-full">{companyPlan}</span>
       </div>
       {onWizard && <button onClick={onWizard} className="mt-2 w-full text-xs text-brand-500 hover:text-brand-300 text-center py-1 hover:bg-brand-900 rounded-lg transition-all">↺ Re-run setup wizard</button>}
       {onSignOut && <button onClick={onSignOut} className="mt-1 w-full text-xs text-red-400 hover:text-red-300 text-center py-1 hover:bg-brand-900 rounded-lg transition-all">⎋ Sign out</button>}
     </div>
   </aside>
-);
+  );
+};
 
 const Header = ({ title, subtitle, children }) => (
   <header className="h-16 bg-white border-b border-slate-100 flex items-center px-8 sticky top-0 z-20">
@@ -358,13 +365,24 @@ const Header = ({ title, subtitle, children }) => (
 // DASHBOARD
 // ═══════════════════════════════════════════════════════
 const DashboardPage = ({ onNavigate }) => {
-  const totalPlantCO2 = GHG_SCOPE1.plant.reduce((s,p) => s+p.co2, 0);
-  const totalVehicleCO2 = GHG_SCOPE1.vehicles.reduce((s,v) => s+v.co2, 0);
+  const { company, score: ctxScore = 52, plantFleet = [], vehicleFleet = [], scoreHistory = [] } = useApp() || {};
+
+  // Compute CO2 from live fleet data
+  const totalPlantCO2 = plantFleet.reduce((s,p) => {
+    const f = p.ef || DEFRA.plant[p.type]?.factor || 0;
+    return s + (p.hvo ? p.hours*f*DEFRA.HVO_MULTIPLIER : p.hours*f)/1000;
+  }, 0);
+  const totalVehicleCO2 = vehicleFleet.reduce((s,v) => {
+    const f = v.ef || DEFRA.vehicles[v.type]?.factor || 0;
+    return s + v.miles*f/1000;
+  }, 0);
   const totalCO2 = Math.round((totalPlantCO2+totalVehicleCO2)*100)/100;
+
+  const displayHistory = scoreHistory.length > 0 ? scoreHistory : SCORE_HISTORY;
 
   return (
     <div className="flex-1 overflow-auto">
-      <Header title="Dashboard" subtitle={`${COMPANY.scoreMonth} · ${COMPANY.sector}`}>
+      <Header title="Dashboard" subtitle={company?.trade || 'Construction & Civil Engineering'}>
         <button onClick={() => onNavigate('update')} className="flex items-center gap-2 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition-all">
           ✏️ Update This Month
         </button>
@@ -375,18 +393,18 @@ const DashboardPage = ({ onNavigate }) => {
         <div className="grid grid-cols-4 gap-5 mb-8">
           <Card className="p-6 col-span-1 flex flex-col items-center justify-center">
             <p className="text-slate-400 text-xs font-medium uppercase tracking-wide mb-3">Groundwork Score</p>
-            <ScoreRing score={COMPANY.score} prev={COMPANY.prevScore} size={120}/>
-            <p className="text-slate-400 text-xs mt-3 text-center">Score improved from 55 in Oct 2025</p>
+            <ScoreRing score={ctxScore} prev={displayHistory.length > 1 ? displayHistory[displayHistory.length-2]?.score : undefined} size={120}/>
+            <p className="text-slate-400 text-xs mt-3 text-center">{company?.name || 'Your Company'}</p>
           </Card>
 
           <div className="col-span-3 grid grid-cols-3 gap-5">
             {[
-              { label:'Tenders Eligible',    value:`${TENDERS.filter(t=>t.status==='eligible').length}`,     sub:`of ${TENDERS.length} in pipeline`,    color:'text-brand-600',  icon:'📋' },
-              { label:'CO₂e This Month',     value:`${totalCO2}t`,                                          sub:'Scope 1 — plant & fleet',              color:'text-slate-700',  icon:'🌍' },
-              { label:'Data Completeness',   value:'87%',                                                    sub:'3 inputs outstanding',                 color:'text-amber-500',  icon:'✅' },
-              { label:'Accreditations',      value:'7/10',                                                   sub:'1 expired · 2 missing',                color:'text-slate-700',  icon:'🏅' },
-              { label:'Last Updated',        value:'12 Apr',                                                 sub:'8 days ago · 6 min session',           color:'text-slate-700',  icon:'🕐' },
-              { label:'HVO Saving (YTD)',    value:'0t',                                                     sub:'Enable HVO to start saving',           color:'text-slate-400',  icon:'⚡' },
+              { label:'CO₂e This Month',     value:`${totalCO2}t`,  sub:'Scope 1 — plant & fleet',    color:'text-slate-700',  icon:'🌍' },
+              { label:'Plant Items',          value:`${plantFleet.length}`, sub:'registered in fleet',  color:'text-brand-600',  icon:'🏗️' },
+              { label:'Vehicles',             value:`${vehicleFleet.length}`, sub:'registered in fleet',color:'text-slate-700',  icon:'🚐' },
+              { label:'Company',              value: company?.name ? company.name.split(' ').slice(-1)[0] : '—', sub: company?.name || 'Complete setup wizard', color:'text-slate-700', icon:'🏢' },
+              { label:'Plan',                 value: company?.plan ? (company.plan.charAt(0).toUpperCase()+company.plan.slice(1)) : 'Essentials', sub:'current subscription tier', color:'text-brand-600', icon:'📦' },
+              { label:'HVO Saving (YTD)',     value:'0t',            sub:'Enable HVO to start saving',  color:'text-slate-400',  icon:'⚡' },
             ].map((k,i) => (
               <Card key={i} className="p-4">
                 <div className="flex items-start justify-between">
@@ -403,11 +421,11 @@ const DashboardPage = ({ onNavigate }) => {
         {/* Score trend + Actions */}
         <div className="grid grid-cols-3 gap-5 mb-5">
           <Card className="col-span-2 p-6">
-            <SectionHeader title="Score Trend" subtitle="Past 6 months"/>
+            <SectionHeader title="Score Trend" subtitle={`Past ${displayHistory.length} months`}/>
             <div className="flex items-end gap-2 h-32">
-              {SCORE_HISTORY.map((d,i) => {
+              {displayHistory.map((d,i) => {
                 const h = (d.score/100)*100;
-                const isLast = i===SCORE_HISTORY.length-1;
+                const isLast = i===displayHistory.length-1;
                 return (
                   <div key={d.month} className="flex-1 flex flex-col items-center gap-1">
                     <span className="text-xs font-semibold text-slate-600">{d.score}</span>
@@ -416,6 +434,11 @@ const DashboardPage = ({ onNavigate }) => {
                   </div>
                 );
               })}
+              {displayHistory.length === 0 && (
+                <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">
+                  No history yet — update your first month to start tracking.
+                </div>
+              )}
             </div>
           </Card>
 
@@ -468,8 +491,9 @@ const LAST_MONTH_PLANT = { 1:142, 2:98, 3:210, 4:76 };
 const LAST_MONTH_VEH   = { 1:1840, 2:2210, 3:980 };
 
 const UpdatePage = ({ onNavigate }) => {
-  const [plant, setPlant]       = useState(PLANT_FLEET.map(p => ({...p, confirmed:false})));
-  const [vehicles, setVehicles] = useState(VEHICLE_FLEET.map(v => ({...v, confirmed:false})));
+  const { plantFleet = [], vehicleFleet = [], score: ctxScore = 52, refreshData } = useApp() || {};
+  const [plant, setPlant]       = useState(() => plantFleet.map(p => ({...p, lastHours: p.hours, confirmed:false})));
+  const [vehicles, setVehicles] = useState(() => vehicleFleet.map(v => ({...v, lastMiles: v.miles, confirmed:false})));
   const [skips, setSkips]       = useState(SKIP_LOG.map(s => ({...s})));
   const [t1, setT1]             = useState(TIER1.map(m => ({...m})));
   const [openSection, setOpenSection] = useState('plant');
@@ -478,10 +502,10 @@ const UpdatePage = ({ onNavigate }) => {
   const [done, setDone]         = useState(false);
 
   const liveScore = calcScore(t1, TIER2, TIER3, 0.95);
-  const scoreDelta = liveScore - COMPANY.score;
+  const scoreDelta = liveScore - ctxScore;
 
   const plantCO2 = plant.reduce((s,p) => {
-    const f = DEFRA.plant[p.type]?.factor || 0;
+    const f = p.ef || DEFRA.plant[p.type]?.factor || 0;
     return s + (p.hvo ? p.hours*f*DEFRA.HVO_MULTIPLIER : p.hours*f)/1000;
   }, 0);
 
@@ -509,7 +533,7 @@ const UpdatePage = ({ onNavigate }) => {
           <h2 className="text-3xl font-bold text-slate-900 mb-2">Score updated</h2>
           <div className="flex items-center justify-center gap-6 my-6">
             <div className="text-center">
-              <p className="text-4xl font-bold text-slate-400">{COMPANY.score}</p>
+              <p className="text-4xl font-bold text-slate-400">{ctxScore}</p>
               <p className="text-xs text-slate-400 mt-1">Previous</p>
             </div>
             <span className="text-3xl text-slate-300">→</span>
@@ -518,7 +542,7 @@ const UpdatePage = ({ onNavigate }) => {
               <p className="text-xs text-slate-400 mt-1">Updated</p>
             </div>
             <div className="px-3 py-1.5 bg-brand-100 text-brand-700 rounded-full text-sm font-bold">
-              +{liveScore - COMPANY.score} pts
+              {liveScore - ctxScore >= 0 ? '+' : ''}{liveScore - ctxScore} pts
             </div>
           </div>
           <p className="text-slate-500 text-sm mb-8">Your score has been updated with this month's data. Reports will reflect the new figures immediately.</p>
@@ -565,6 +589,7 @@ const UpdatePage = ({ onNavigate }) => {
                 const vehicleData = vehicles.map(v => ({ vehicle_id: v.id, name: v.name, miles: v.miles }));
                 const co2e = plantCO2;
                 await DB.saveMonthlyUpdate({ userId: user.id, plant: plantData, vehicles: vehicleData, score: liveScore, co2e });
+                if (refreshData) refreshData();
               } catch(_) {}
             }
             setSaving(false); setSaved(true); setTimeout(()=>setDone(true), 400);
@@ -592,18 +617,24 @@ const UpdatePage = ({ onNavigate }) => {
                   {sec.id==='plant' && (
                     <div>
                       <p className="text-xs text-slate-400 mb-4">Enter hours run this month. HVO toggle reduces CO₂e by 90%.</p>
+                      {plant.length === 0 && (
+                        <div className="text-center py-8 text-slate-400">
+                          <p className="text-3xl mb-2">🏗️</p>
+                          <p className="text-sm font-medium">No plant registered yet.</p>
+                          <p className="text-xs mt-1">Run the setup wizard to add your plant fleet.</p>
+                        </div>
+                      )}
                       <div className="space-y-3">
                         {plant.map((p,i) => {
-                          const f = DEFRA.plant[p.type]?.factor || 0;
+                          const f = p.ef || DEFRA.plant[p.type]?.factor || 0;
                           const co2 = p.hvo ? Math.round(p.hours*f*DEFRA.HVO_MULTIPLIER*10)/10 : Math.round(p.hours*f*10)/10;
-                          const lastVal = LAST_MONTH_PLANT[p.id];
-                          const unchanged = lastVal && p.hours === lastVal;
+                          const lastVal = p.lastHours || 0;
                           return (
                             <div key={p.id} className={`grid grid-cols-5 gap-3 items-center p-3 rounded-xl border transition-all ${p.confirmed?'bg-brand-50 border-brand-200':'bg-slate-50 border-slate-100'}`}>
                               <div className="col-span-2">
                                 <p className="text-sm font-medium text-slate-800">{p.name}</p>
                                 <p className="text-xs text-slate-400">{p.type}</p>
-                                {lastVal && <p className="text-xs text-brand-500 mt-0.5">Last month: {lastVal} hrs</p>}
+                                {lastVal > 0 && <p className="text-xs text-brand-500 mt-0.5">Last month: {lastVal} hrs</p>}
                               </div>
                               <div>
                                 <label className="text-xs text-slate-500 block mb-1">Hours this month</label>
@@ -611,7 +642,7 @@ const UpdatePage = ({ onNavigate }) => {
                                   <input type="number" value={p.hours} min="0"
                                     onChange={e => setPlant(prev => prev.map((x,j) => j===i?{...x,hours:+e.target.value,confirmed:false}:x))}
                                     className={`w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none transition-all ${p.confirmed?'border-brand-300 bg-white':'border-slate-200 focus:border-brand-400'}`}/>
-                                  {lastVal && !p.confirmed && (
+                                  {lastVal > 0 && !p.confirmed && (
                                     <button title="Same as last month"
                                       onClick={() => setPlant(prev => prev.map((x,j) => j===i?{...x,hours:lastVal,confirmed:true}:x))}
                                       className="px-2 py-1.5 bg-brand-100 text-brand-600 rounded-lg text-xs font-bold hover:bg-brand-200 whitespace-nowrap transition-all">
@@ -648,18 +679,25 @@ const UpdatePage = ({ onNavigate }) => {
                   {sec.id==='vehicles' && (
                     <div>
                       <p className="text-xs text-slate-400 mb-4">Enter miles driven per vehicle this month.</p>
+                      {vehicles.length === 0 && (
+                        <div className="text-center py-8 text-slate-400">
+                          <p className="text-3xl mb-2">🚐</p>
+                          <p className="text-sm font-medium">No vehicles registered yet.</p>
+                          <p className="text-xs mt-1">Run the setup wizard to add your fleet.</p>
+                        </div>
+                      )}
                       <div className="space-y-3">
                         {vehicles.map((v,i) => {
-                          const f = DEFRA.vehicles[v.type]?.factor || 0;
+                          const f = v.ef || DEFRA.vehicles[v.type]?.factor || 0;
                           const co2 = Math.round(v.miles*f*100)/100;
-                          const isElec = DEFRA.vehicles[v.type]?.electric;
-                          const lastVal = LAST_MONTH_VEH[v.id];
+                          const isElec = v.type?.toLowerCase().includes('electric');
+                          const lastVal = v.lastMiles || 0;
                           return (
                             <div key={v.id} className={`grid grid-cols-4 gap-3 items-center p-3 rounded-xl border transition-all ${v.confirmed?'bg-brand-50 border-brand-200':'bg-slate-50 border-slate-100'}`}>
                               <div className="col-span-2">
                                 <p className="text-sm font-medium text-slate-800">{v.name}</p>
                                 <p className={`text-xs ${isElec?'text-brand-500 font-semibold':'text-slate-400'}`}>{v.type}{isElec?' ⚡':''}</p>
-                                {lastVal && <p className="text-xs text-brand-500 mt-0.5">Last month: {lastVal.toLocaleString()} mi</p>}
+                                {lastVal > 0 && <p className="text-xs text-brand-500 mt-0.5">Last month: {lastVal.toLocaleString()} mi</p>}
                               </div>
                               <div>
                                 <label className="text-xs text-slate-500 block mb-1">Miles this month</label>
@@ -667,7 +705,7 @@ const UpdatePage = ({ onNavigate }) => {
                                   <input type="number" value={v.miles} min="0"
                                     onChange={e => setVehicles(prev => prev.map((x,j) => j===i?{...x,miles:+e.target.value,confirmed:false}:x))}
                                     className={`w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none transition-all ${v.confirmed?'border-brand-300 bg-white':'border-slate-200 focus:border-brand-400'}`}/>
-                                  {lastVal && !v.confirmed && (
+                                  {lastVal > 0 && !v.confirmed && (
                                     <button title="Same as last month"
                                       onClick={() => setVehicles(prev => prev.map((x,j) => j===i?{...x,miles:lastVal,confirmed:true}:x))}
                                       className="px-2 py-1.5 bg-brand-100 text-brand-600 rounded-lg text-xs font-bold hover:bg-brand-200 whitespace-nowrap transition-all">
@@ -770,7 +808,7 @@ const UpdatePage = ({ onNavigate }) => {
             </div>
             <div className="flex items-center gap-4">
               <div className="text-center">
-                <p className="text-3xl font-bold text-amber-500">{COMPANY.score}</p>
+                <p className="text-3xl font-bold text-amber-500">{ctxScore}</p>
                 <p className="text-xs text-slate-400">Current</p>
               </div>
               <span className="text-slate-300 text-2xl">→</span>
@@ -791,7 +829,9 @@ const UpdatePage = ({ onNavigate }) => {
 // SCORE & INSIGHTS
 // ═══════════════════════════════════════════════════════
 const InsightsPage = () => {
+  const { score: ctxScore = 52, scoreHistory = [] } = useApp() || {};
   const [tab, setTab] = useState('breakdown');
+  const prevScore = scoreHistory.length > 1 ? scoreHistory[scoreHistory.length-2]?.score : undefined;
   return (
     <div className="flex-1 overflow-auto">
       <Header title="Score & Insights" subtitle="What's driving your score and how to improve it"/>
@@ -801,7 +841,7 @@ const InsightsPage = () => {
         {tab==='breakdown' && (
           <div className="grid grid-cols-3 gap-5">
             <Card className="p-6 flex flex-col items-center">
-              <ScoreRing score={COMPANY.score} prev={COMPANY.prevScore} size={140}/>
+              <ScoreRing score={ctxScore} prev={prevScore} size={140}/>
               <div className="mt-4 space-y-2 w-full">
                 {[{label:'Tier 1 (40%)',score:73,color:'bg-brand-500'},{label:'Tier 2 (50%)',score:65,color:'bg-amber-400'},{label:'Tier 3 Bonus',score:3,max:10,color:'bg-blue-400'}].map(t=>(
                   <div key={t.label}>
@@ -911,10 +951,18 @@ const InsightsPage = () => {
 // GHG EXPLORER
 // ═══════════════════════════════════════════════════════
 const GHGPage = () => {
+  const { plantFleet = [], vehicleFleet = [] } = useApp() || {};
   const [tab, setTab] = useState('scope1');
 
-  const plantData = GHG_SCOPE1.plant;
-  const vehicleData = GHG_SCOPE1.vehicles;
+  // Compute live CO2 from context fleet data
+  const plantData = plantFleet.map(p => ({
+    ...p, factor: p.ef || DEFRA.plant[p.type]?.factor || 0,
+    co2: Math.round(p.hours * (p.ef || DEFRA.plant[p.type]?.factor || 0) / 1000 * 100) / 100,
+  }));
+  const vehicleData = vehicleFleet.map(v => ({
+    ...v, factor: v.ef || DEFRA.vehicles[v.type]?.factor || 0,
+    co2: Math.round(v.miles * (v.ef || DEFRA.vehicles[v.type]?.factor || 0) / 1000 * 100) / 100,
+  }));
   const totalPlant = plantData.reduce((s,p)=>s+p.co2,0);
   const totalVehicle = vehicleData.reduce((s,v)=>s+v.co2,0);
   const totalScope1 = Math.round((totalPlant+totalVehicle)*100)/100;
@@ -1220,18 +1268,20 @@ const scoreRingSVG = (score, size=100) => {
   </svg>`;
 };
 
-const gwFooter = (page, total, reportName) => `
+const gwFooter = (page, total, reportName, companyName) => `
   <div class="footer">
     <div class="gw-logo"><div class="gw-icon">GW</div>
       <div><p style="font-size:11px;font-weight:600;color:#334155">Groundwork by Neoteric</p>
       <p style="font-size:10px;color:#94a3b8">${reportName}</p></div>
     </div>
     <p>Page ${page} of ${total} · Generated ${new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})}</p>
-    <p>Data: DEFRA 2024 GHG Conversion Factors · ${COMPANY.name}</p>
+    <p>Data: DEFRA 2024 GHG Conversion Factors · ${companyName || COMPANY.name}</p>
   </div>`;
 
 // ── MONTHLY SUMMARY ──────────────────────────────────────
-const genMonthly = () => {
+const genMonthly = (co = COMPANY, ghg = GHG_SCOPE1) => {
+  // eslint-disable-next-line no-shadow
+  const COMPANY = co; const GHG_SCOPE1 = ghg;
   const totalPlant = GHG_SCOPE1.plant.reduce((s,p)=>s+p.co2,0);
   const totalVeh   = GHG_SCOPE1.vehicles.reduce((s,v)=>s+v.co2,0);
   const totalS1    = (totalPlant+totalVeh).toFixed(3);
@@ -1314,7 +1364,7 @@ const genMonthly = () => {
     <div style="background:#f0faf4;border:1px solid #b4e5c9;border-radius:12px;padding:16px;margin-top:8px">
       <p style="font-size:12px;font-weight:600;color:#0a3d2a">📌 Priority this month: Renew ISO 45001 — currently blocking 3 tender applications.</p>
     </div>
-    ${gwFooter(1,2,'Monthly Summary — March 2026')}
+    ${gwFooter(1,2,'Monthly Summary — March 2026',COMPANY.name)}
   </div>`;
 
   const p2 = `<div class="page">
@@ -1345,14 +1395,16 @@ const genMonthly = () => {
     </div>
     <div class="divider"/>
     <p style="font-size:11px;color:#94a3b8;margin-top:auto">This report was auto-generated by Groundwork using verified operational data entered by ${COMPANY.name}. Emission calculations use DEFRA 2024 Greenhouse Gas Conversion Factors. Waste data uses WRAP methodology. This document does not constitute independent third-party assurance.</p>
-    ${gwFooter(2,2,'Monthly Summary — March 2026')}
+    ${gwFooter(2,2,'Monthly Summary — March 2026',COMPANY.name)}
   </div>`;
 
   return reportShell('Monthly Sustainability Summary — March 2026', p1+p2);
 };
 
 // ── ANNUAL VSME REPORT ────────────────────────────────────
-const genAnnual = () => {
+const genAnnual = (co = COMPANY, ghg = GHG_SCOPE1) => {
+  // eslint-disable-next-line no-shadow
+  const COMPANY = co; const GHG_SCOPE1 = ghg;
   const totalS1 = (GHG_SCOPE1.plant.reduce((s,p)=>s+p.co2,0)+GHG_SCOPE1.vehicles.reduce((s,v)=>s+v.co2,0)).toFixed(2);
 
   const cover = `<div class="page">
@@ -1390,7 +1442,7 @@ const genAnnual = () => {
         </div>
       </div>
     </div>
-    ${gwFooter(1,10,'Annual VSME Sustainability Report 2025')}
+    ${gwFooter(1,10,'Annual VSME Sustainability Report 2025',COMPANY.name)}
   </div>`;
 
   const overview = `<div class="page">
@@ -1435,7 +1487,7 @@ const genAnnual = () => {
         </div>`;
       }).join('')}
     </div>
-    ${gwFooter(2,10,'Annual VSME Sustainability Report 2025')}
+    ${gwFooter(2,10,'Annual VSME Sustainability Report 2025',COMPANY.name)}
   </div>`;
 
   const environmental = `<div class="page">
@@ -1484,7 +1536,7 @@ const genAnnual = () => {
     <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:14px;margin-top:4px">
       <p style="font-size:12px;color:#92400e"><strong>Reduction commitment:</strong> ${COMPANY.name} is committed to reducing Scope 1 emissions by 15% in 2026, primarily through HVO fuel adoption across the plant fleet. Full net zero target: 2040.</p>
     </div>
-    ${gwFooter(3,10,'Annual VSME Sustainability Report 2025')}
+    ${gwFooter(3,10,'Annual VSME Sustainability Report 2025',COMPANY.name)}
   </div>`;
 
   const social = `<div class="page">
@@ -1543,7 +1595,7 @@ const genAnnual = () => {
         </table>
       </div>
     </div>
-    ${gwFooter(4,10,'Annual VSME Sustainability Report 2025')}
+    ${gwFooter(4,10,'Annual VSME Sustainability Report 2025',COMPANY.name)}
   </div>`;
 
   const governance = `<div class="page">
@@ -1607,14 +1659,16 @@ const genAnnual = () => {
     </table>
     <div class="divider"/>
     <p style="font-size:11px;color:#94a3b8">This report has been prepared by the directors of ${COMPANY.name}. Emissions data uses DEFRA 2024 GHG Conversion Factors. Waste data uses WRAP methodology. This report has not been subject to independent third-party assurance but uses verified operational data captured through the Groundwork platform.</p>
-    ${gwFooter(5,10,'Annual VSME Sustainability Report 2025')}
+    ${gwFooter(5,10,'Annual VSME Sustainability Report 2025',COMPANY.name)}
   </div>`;
 
   return reportShell(`${COMPANY.name} — Annual Sustainability Report 2025`, cover+overview+environmental+social+governance);
 };
 
 // ── TENDER SUSTAINABILITY PACK ────────────────────────────
-const genTenderPack = () => {
+const genTenderPack = (co = COMPANY, ghg = GHG_SCOPE1) => {
+  // eslint-disable-next-line no-shadow
+  const COMPANY = co; const GHG_SCOPE1 = ghg;
   const totalS1 = (GHG_SCOPE1.plant.reduce((s,p)=>s+p.co2,0)+GHG_SCOPE1.vehicles.reduce((s,v)=>s+v.co2,0)).toFixed(3);
 
   const p1 = `<div class="page">
@@ -1654,7 +1708,7 @@ const genTenderPack = () => {
         <div class="metric-sub">${m.sub}</div>
       </div>`).join('')}
     </div>
-    ${gwFooter(1,4,'Tender Sustainability Pack — March 2026')}
+    ${gwFooter(1,4,'Tender Sustainability Pack — March 2026',COMPANY.name)}
   </div>`;
 
   const p2 = `<div class="page">
@@ -1691,7 +1745,7 @@ const genTenderPack = () => {
         }).join('')}
       </tbody>
     </table>
-    ${gwFooter(2,4,'Tender Sustainability Pack — March 2026')}
+    ${gwFooter(2,4,'Tender Sustainability Pack — March 2026',COMPANY.name)}
   </div>`;
 
   const p3 = `<div class="page">
@@ -1728,7 +1782,7 @@ const genTenderPack = () => {
         <p>16.2t CO₂e per £100k turnover (Scope 1+2 location-based). UK construction sector median: 12.8t. Reduction plan: HVO adoption targeting −15% in 2026.</p>
       </div>
     </div>
-    ${gwFooter(3,4,'Tender Sustainability Pack — March 2026')}
+    ${gwFooter(3,4,'Tender Sustainability Pack — March 2026',COMPANY.name)}
   </div>`;
 
   const p4 = `<div class="page">
@@ -1769,14 +1823,16 @@ const genTenderPack = () => {
         <p>This pack was generated by Groundwork (Neoteric Group). Score methodology and data available at groundwork.neoteric.co.uk. Generated: ${new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})}</p>
       </div>
     </div>
-    ${gwFooter(4,4,'Tender Sustainability Pack — March 2026')}
+    ${gwFooter(4,4,'Tender Sustainability Pack — March 2026',COMPANY.name)}
   </div>`;
 
   return reportShell(`Tender Sustainability Pack — ${COMPANY.name}`, p1+p2+p3+p4);
 };
 
 // ── NET ZERO TRAJECTORY REPORT ────────────────────────────
-const genNetZero = () => {
+const genNetZero = (co = COMPANY, ghg = GHG_SCOPE1) => {
+  // eslint-disable-next-line no-shadow
+  const COMPANY = co; const GHG_SCOPE1 = ghg;
   const totalS1monthly = (GHG_SCOPE1.plant.reduce((s,p)=>s+p.co2,0)+GHG_SCOPE1.vehicles.reduce((s,v)=>s+v.co2,0)).toFixed(3);
   const nzData = [{y:'2023',t:6.21,label:'Baseline'},{y:'2024',t:5.84,label:''},{y:'2025',t:5.41,label:'Current'},{y:'2026',t:4.80,label:''},{y:'2027',t:4.10,label:''},{y:'2028',t:3.40,label:''},{y:'2030',t:2.20,label:''},{y:'2035',t:0.80,label:''},{y:'2040',t:0.0,label:'Net Zero'}];
   const maxT = 6.21;
@@ -1825,7 +1881,7 @@ const genNetZero = () => {
         <tr><td>2035 → 2040</td><td>0.00t/month</td><td>Residual offsetting, full fleet electrification</td><td style="color:#147a4e">−100%</td></tr>
       </tbody>
     </table>
-    ${gwFooter(1,4,'Net Zero Trajectory Report')}
+    ${gwFooter(1,4,'Net Zero Trajectory Report',COMPANY.name)}
   </div>`;
 
   const p2 = `<div class="page">
@@ -1874,7 +1930,7 @@ const genNetZero = () => {
       </tbody>
     </table>
     <p style="font-size:11px;color:#94a3b8;margin-top:16px">This report uses DEFRA 2024 GHG Conversion Factors for Scope 1+2 emissions. Scope 3 figures are estimates. Net zero trajectory is indicative and will be reviewed annually. Data period: March 2026. Prepared by Groundwork, Neoteric Group.</p>
-    ${gwFooter(2,4,'Net Zero Trajectory Report')}
+    ${gwFooter(2,4,'Net Zero Trajectory Report',COMPANY.name)}
   </div>`;
 
   return reportShell(`Net Zero Trajectory Report — ${COMPANY.name}`, p1+p2);
@@ -1891,9 +1947,37 @@ const openReport = (html) => {
 // REPORTS
 // ═══════════════════════════════════════════════════════
 const ReportsPage = () => {
+  const { company, plantFleet = [], vehicleFleet = [], score: ctxScore = 52 } = useApp() || {};
   const [generating, setGenerating] = useState(null);
 
-  const GENERATORS = { 1:genAnnual, 2:genMonthly, 3:genTenderPack, 4:genNetZero };
+  // Build a context-aware company object and GHG data for the generators
+  const co = company ? {
+    name:     company.name || 'Your Company',
+    reg:      company.reg  || '—',
+    sector:   company.trade || 'Construction & Civil Engineering',
+    employees:company.employees || '—',
+    turnover: company.turnover_band || '—',
+    founded:  company.founded || '—',
+    location: company.location || '—',
+    plan:     company.plan || 'essentials',
+    score:    ctxScore,
+    prevScore:ctxScore,
+    scoreMonth: new Date().toLocaleString('en-GB',{month:'long',year:'numeric'}),
+  } : COMPANY;
+  const ghg = {
+    plant: plantFleet.map(p => ({
+      ...p, factor: p.ef || DEFRA.plant[p.type]?.factor || 0,
+      co2: Math.round(p.hours * (p.ef || DEFRA.plant[p.type]?.factor || 0) / 1000 * 100) / 100,
+    })),
+    vehicles: vehicleFleet.map(v => ({
+      ...v, factor: v.ef || DEFRA.vehicles[v.type]?.factor || 0,
+      co2: Math.round(v.miles * (v.ef || DEFRA.vehicles[v.type]?.factor || 0) / 1000 * 100) / 100,
+    })),
+  };
+  // Fall back to static GHG if no fleet data yet
+  const ghgData = (ghg.plant.length > 0 || ghg.vehicles.length > 0) ? ghg : GHG_SCOPE1;
+
+  const GENERATORS = { 1: () => genAnnual(co, ghgData), 2: () => genMonthly(co, ghgData), 3: () => genTenderPack(co, ghgData), 4: () => genNetZero(co, ghgData) };
 
   const handleGenerate = (r) => {
     setGenerating(r.id);
@@ -1982,6 +2066,7 @@ const ReportsPage = () => {
 // STRATEGY HUB
 // ═══════════════════════════════════════════════════════
 const StrategyPage = () => {
+  const { score: ctxScore = 52 } = useApp() || {};
   const [tab, setTab] = useState('esg');
   return (
     <div className="flex-1 overflow-auto">
@@ -2097,7 +2182,7 @@ const StrategyPage = () => {
                 <p className="text-brand-600 text-sm mt-0.5">You are currently on track. Next milestone: Q4 2025 → 76 pts</p>
               </div>
               <div className="text-right">
-                <p className="text-3xl font-bold text-brand-700">{COMPANY.score}</p>
+                <p className="text-3xl font-bold text-brand-700">{ctxScore}</p>
                 <p className="text-xs text-brand-500">current score</p>
               </div>
             </div>
@@ -2188,6 +2273,7 @@ const StrategyPage = () => {
 const EDGE_BASE = `${SUPABASE_URL}/functions/v1`;
 
 const TenderPage = () => {
+  const { company, score: ctxScore = 52 } = useApp() || {};
   const [tab, setTab]             = useState('live');
   const [tenders, setTenders]     = useState([]);
   const [loading, setLoading]     = useState(true);
@@ -2239,7 +2325,7 @@ const TenderPage = () => {
       const r = await fetch(`${EDGE_BASE}/analyze-tender`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tender, company: { score: SCORE_DATA.overall, plan: 'growth', trade: COMPANY.trade } }),
+        body: JSON.stringify({ tender, company: { score: ctxScore, plan: company?.plan || 'growth', trade: company?.trade || '' } }),
       });
       const data = await r.json();
       setAnalysis(prev => ({ ...prev, [tender.id]: data }));
@@ -2926,6 +3012,12 @@ const SetupWizard = ({ onComplete }) => {
 };
 
 // ═══════════════════════════════════════════════════════
+// APP CONTEXT  (live user data — replaces mock constants)
+// ═══════════════════════════════════════════════════════
+const AppCtx = React.createContext(null);
+const useApp = () => React.useContext(AppCtx);
+
+// ═══════════════════════════════════════════════════════
 // SUPABASE CONFIG
 // Replace these with your actual Supabase project values
 // from https://app.supabase.com → Settings → API
@@ -3209,6 +3301,39 @@ const DB = {
     const { data } = await supabaseClient.from('profiles').select('*, companies(*)').eq('id', userId).single();
     return data;
   },
+  async loadAppData(userId) {
+    const profile = await DB.getProfile(userId);
+    if (!profile?.company_id) return null;
+    const cid = profile.company_id;
+    const [plantRes, vehicleRes, certRes, updateRes, historyRes] = await Promise.all([
+      supabaseClient.from('plant_fleet').select('*').eq('company_id', cid).eq('active', true),
+      supabaseClient.from('vehicles').select('*').eq('company_id', cid).eq('active', true),
+      supabaseClient.from('certifications').select('*').eq('company_id', cid),
+      supabaseClient.from('monthly_updates').select('*').eq('company_id', cid).order('created_at', { ascending: false }).limit(1).single(),
+      supabaseClient.from('score_history').select('*').eq('company_id', cid).order('recorded_at', { ascending: false }).limit(6),
+    ]);
+    const lastUpdate = updateRes.data;
+    const plant = (plantRes.data || []).map((p) => {
+      const lastHours = lastUpdate ? (lastUpdate.plant_hours || []).find(h => h.name === p.name)?.hours || 0 : 0;
+      const efStored = p.ef_kg_per_hr || DEFRA.plant[p.category]?.factor || 12.5;
+      return { id: p.id, name: p.name, type: p.category || 'Excavator 20–30t', hours: lastHours, hvo: p.fuel_type === 'hvo', ef: efStored };
+    });
+    const vehicles = (vehicleRes.data || []).map((v) => {
+      const lastMiles = lastUpdate ? (lastUpdate.vehicle_miles || []).find(m => m.name === v.name)?.miles || 0 : 0;
+      const typeGuess = v.fuel_type === 'electric' ? 'Transit Custom electric' : 'Transit Custom diesel';
+      const efStored = v.ef_kg_per_mile || DEFRA.vehicles[typeGuess]?.factor || 0.274;
+      return { id: v.id, name: v.name, type: typeGuess, miles: lastMiles, ef: efStored };
+    });
+    const certs = {};
+    (certRes.data || []).forEach(c => { certs[c.cert_key] = c.status === 'held' ? 'yes' : c.status === 'in_progress' ? 'progress' : 'no'; });
+    const scoreHistory = (historyRes.data || []).reverse().map(h => ({ month: new Date(h.recorded_at).toLocaleString('en-GB',{month:'short'}), score: Math.round(h.score) }));
+    const latestScore = lastUpdate?.score || 52;
+    return {
+      company: { ...profile.companies, name: profile.companies?.name || profile.full_name, score: latestScore, plan: profile.companies?.plan || 'essentials', trade: profile.companies?.trade || '' },
+      plant, vehicles, certs, scoreHistory,
+      fullName: profile.full_name || '',
+    };
+  },
   async saveWizardData({ userId, co, trade, plant: plantList, vehicles: vehicleList, certs }) {
     // Update company
     const companyId = (await supabaseClient.from('profiles').select('company_id').eq('id', userId).single()).data?.company_id;
@@ -3254,52 +3379,76 @@ const DB = {
 // APP ROOT
 // ═══════════════════════════════════════════════════════
 const App = () => {
-  const [authState, setAuthState] = useState('loading'); // 'loading' | 'checking' | 'unauthenticated' | 'authenticated'
+  const [authState, setAuthState] = useState('loading');
   const [user, setUser]           = useState(null);
   const [onboarded, setOnboarded] = useState(false);
-  const [page, setPage] = useState('dashboard');
+  const [appData, setAppData]     = useState(null);
+  const [page, setPage]           = useState('dashboard');
   const labels = { dashboard:'Dashboard', update:'Update Data', insights:'Score & Insights', ghg:'GHG Explorer', reports:'Reports', strategy:'Strategy Hub', tender:'Tender Tracker', benchmarks:'Benchmarks', settings:'Settings' };
 
-  const checkOnboarded = async (u) => {
-    if (!u) return false;
+  const initUser = async (u) => {
+    if (!u) return;
     try {
-      const profile = await DB.getProfile(u.id);
-      return !!(profile?.company_id);
-    } catch(_) { return false; }
+      const data = await DB.loadAppData(u.id);
+      if (data) { setAppData(data); setOnboarded(true); }
+      else { setOnboarded(false); }
+    } catch(_) { setOnboarded(false); }
   };
 
-  // Initialise auth state on mount
   React.useEffect(() => {
     if (DEMO_MODE) { setAuthState('unauthenticated'); return; }
     supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
         setUser(session.user);
-        const done = await checkOnboarded(session.user);
-        setOnboarded(done);
+        await initUser(session.user);
         setAuthState('authenticated');
       } else { setAuthState('unauthenticated'); }
     });
     const { data: { subscription } } = supabaseClient.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
         setUser(session.user);
-        const done = await checkOnboarded(session.user);
-        setOnboarded(done);
+        await initUser(session.user);
         setAuthState('authenticated');
-      } else { setUser(null); setAuthState('unauthenticated'); setOnboarded(false); }
+      } else { setUser(null); setAppData(null); setAuthState('unauthenticated'); setOnboarded(false); }
     });
     return () => subscription.unsubscribe();
   }, []);
 
   const handleSignOut = async () => {
     if (!DEMO_MODE) await supabaseClient.auth.signOut();
-    setUser(null); setAuthState('unauthenticated'); setOnboarded(false);
+    setUser(null); setAppData(null); setAuthState('unauthenticated'); setOnboarded(false);
   };
 
   const handleWizardComplete = async ({ co, trade, plant, vehicles, certs }) => {
     if (!DEMO_MODE && user) {
-      try { await DB.saveWizardData({ userId: user.id, co, trade, plant, vehicles, certs }); } catch(_) {}
+      try {
+        await DB.saveWizardData({ userId: user.id, co, trade, plant, vehicles, certs });
+        const data = await DB.loadAppData(user.id);
+        if (data) setAppData(data);
+      } catch(_) {}
     }
     setOnboarded(true);
+  };
+
+  // Build context value — live user data with graceful fallbacks
+  const ctx = appData ? {
+    company:      appData.company,
+    plantFleet:   appData.plant,
+    vehicleFleet: appData.vehicles,
+    certs:        appData.certs,
+    scoreHistory: appData.scoreHistory,
+    fullName:     appData.fullName,
+    score:        appData.company?.score ?? 52,
+    refreshData:  () => user && DB.loadAppData(user.id).then(d => d && setAppData(d)),
+  } : {
+    company:      { name:'Your Company', score:52, plan:'essentials', trade:'' },
+    plantFleet:   [],
+    vehicleFleet: [],
+    certs:        {},
+    scoreHistory: [],
+    fullName:     user?.user_metadata?.full_name || '',
+    score:        52,
+    refreshData:  () => {},
   };
 
   const Spinner = () => (
@@ -3331,10 +3480,12 @@ const App = () => {
   };
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
-      <Sidebar current={page} onChange={setPage} onWizard={() => setOnboarded(false)} onSignOut={handleSignOut}/>
-      <main className="flex-1 ml-64 flex flex-col min-h-screen">{renderPage()}</main>
-    </div>
+    <AppCtx.Provider value={ctx}>
+      <div className="flex min-h-screen bg-slate-50">
+        <Sidebar current={page} onChange={setPage} onWizard={() => setOnboarded(false)} onSignOut={handleSignOut}/>
+        <main className="flex-1 ml-64 flex flex-col min-h-screen">{renderPage()}</main>
+      </div>
+    </AppCtx.Provider>
   );
 };
 
