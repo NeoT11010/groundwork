@@ -491,11 +491,20 @@ const LAST_MONTH_PLANT = { 1:142, 2:98, 3:210, 4:76 };
 const LAST_MONTH_VEH   = { 1:1840, 2:2210, 3:980 };
 
 const UpdatePage = ({ onNavigate }) => {
-  const { plantFleet = [], vehicleFleet = [], score: ctxScore = 52, refreshData } = useApp() || {};
+  const { plantFleet = [], vehicleFleet = [], score: ctxScore = 52, refreshData, tier1Metrics } = useApp() || {};
   const [plant, setPlant]       = useState(() => plantFleet.map(p => ({...p, lastHours: p.hours, confirmed:false})));
   const [vehicles, setVehicles] = useState(() => vehicleFleet.map(v => ({...v, lastMiles: v.miles, confirmed:false})));
   const [skips, setSkips]       = useState(SKIP_LOG.map(s => ({...s})));
-  const [t1, setT1]             = useState(TIER1.map(m => ({...m})));
+  // Init T1 from last saved DB values if available, otherwise use defaults
+  const [t1, setT1]             = useState(() =>
+    TIER1.map(m => {
+      if (tier1Metrics) {
+        const saved = tier1Metrics.find(s => s.id === m.id);
+        if (saved) return { ...m, value: saved.value };
+      }
+      return { ...m };
+    })
+  );
   const [openSection, setOpenSection] = useState('plant');
   const [saved, setSaved]       = useState(false);
   const [saving, setSaving]     = useState(false);
@@ -588,7 +597,8 @@ const UpdatePage = ({ onNavigate }) => {
                 const plantData = plant.map(p => ({ plant_id: p.id, name: p.name, hours: p.hours }));
                 const vehicleData = vehicles.map(v => ({ vehicle_id: v.id, name: v.name, miles: v.miles }));
                 const co2e = plantCO2;
-                await DB.saveMonthlyUpdate({ userId: user.id, plant: plantData, vehicles: vehicleData, score: liveScore, co2e });
+                const tier1Data = t1.map(m => ({ id: m.id, value: m.value }));
+                await DB.saveMonthlyUpdate({ userId: user.id, plant: plantData, vehicles: vehicleData, score: liveScore, co2e, tier1: tier1Data });
                 if (refreshData) refreshData();
               } catch(_) {}
             }
@@ -3326,12 +3336,18 @@ const DB = {
     });
     const certs = {};
     (certRes.data || []).forEach(c => { certs[c.cert_key] = c.status === 'held' ? 'yes' : c.status === 'in_progress' ? 'progress' : 'no'; });
+    // historyRes is ordered newest-first; grab latest before reverse mutates the array
+    const latestHistoryScore = historyRes.data && historyRes.data.length > 0 ? Number(historyRes.data[0].score) : null;
     const scoreHistory = (historyRes.data || []).reverse().map(h => ({ month: new Date(h.recorded_at).toLocaleString('en-GB',{month:'short'}), score: Math.round(h.score) }));
-    const latestScore = lastUpdate?.score || 52;
+    // Prefer score from latest monthly_update; fall back to most recent score_history entry; then 52
+    const latestScore = lastUpdate?.score || latestHistoryScore || 52;
+    // Load saved T1 metric values so UpdatePage shows the user's real data
+    const tier1Metrics = lastUpdate?.tier1_values || null;
     return {
       company: { ...profile.companies, name: profile.companies?.name || profile.full_name, score: latestScore, plan: profile.companies?.plan || 'essentials', trade: profile.companies?.trade || '' },
       plant, vehicles, certs, scoreHistory,
       fullName: profile.full_name || '',
+      tier1Metrics,
     };
   },
   async saveWizardData({ userId, co, trade, plant: plantList, vehicles: vehicleList, certs }) {
@@ -3370,8 +3386,16 @@ const DB = {
         await supabaseClient.from('certifications').upsert(row, { onConflict: 'company_id,cert_key' });
       }
     }
+    // Save initial baseline score so new users don't see the hardcoded 52 fallback
+    try {
+      const now = new Date();
+      await supabaseClient.from('score_history').insert({
+        company_id: companyId, score: 52, co2e_total_t: 0,
+        period_month: now.getMonth() + 1, period_year: now.getFullYear(),
+      });
+    } catch(_) {} // ignore duplicate if wizard re-run
   },
-  async saveMonthlyUpdate({ userId, plant: plantData, vehicles: vehicleData, score, co2e }) {
+  async saveMonthlyUpdate({ userId, plant: plantData, vehicles: vehicleData, score, co2e, tier1: tier1Data }) {
     const companyId = (await supabaseClient.from('profiles').select('company_id').eq('id', userId).single()).data?.company_id;
     if (!companyId) return;
     const now = new Date();
@@ -3380,6 +3404,7 @@ const DB = {
     await supabaseClient.from('monthly_updates').upsert({
       company_id: companyId, period_month: month, period_year: year,
       plant_hours: plantData, vehicle_miles: vehicleData,
+      tier1_values: tier1Data || null,
       score, co2e_total_t: co2e, submitted_by: userId, created_at: now.toISOString(),
     }, { onConflict: 'company_id,period_year,period_month' });
     await supabaseClient.from('score_history').insert({ company_id: companyId, score, co2e_total_t: co2e, period_month: month, period_year: year });
@@ -3450,6 +3475,7 @@ const App = () => {
     scoreHistory: appData.scoreHistory,
     fullName:     appData.fullName,
     score:        appData.company?.score ?? 52,
+    tier1Metrics: appData.tier1Metrics || null,
     refreshData:  () => user && DB.loadAppData(user.id).then(d => d && setAppData(d)),
   } : {
     company:      { name:'Your Company', score:52, plan:'essentials', trade:'' },
@@ -3459,6 +3485,7 @@ const App = () => {
     scoreHistory: [],
     fullName:     user?.user_metadata?.full_name || '',
     score:        52,
+    tier1Metrics: null,
     refreshData:  () => {},
   };
 
